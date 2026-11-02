@@ -1,126 +1,26 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<title>Megapot 自选号调试工具（仅学习）</title>
-<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
-<style>
-*{box-sizing:border-box;font-family:system-ui}
-body{max-width:600px;margin:2rem auto;padding:0 1rem}
-.card{border:1px solid #ccc;padding:1.5rem;border-radius:12px;margin-bottom:1rem}
-input{width:70px;padding:6px;margin:4px}
-button{padding:8px 14px;margin:4px;cursor:pointer}
-.info{color:#3366cc}
-.err{color:#c00}
-.success{color:#090}
-</style>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Megapot · 自选彩票</title>
+<link rel="stylesheet" href="styles.css">
+<script defer src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<script defer src="app.js"></script>
 </head>
 <body>
-<h2>Megapot 合约调试器（自选号码）</h2>
-<div class="card">
-  <div>当前Bonus上限：<span id="bonusMax">--</span></div>
-  <button onclick="fetchBonusMax()">刷新Bonus上限</button>
-  <div class="info">Base合约：0x3bAe643002069dBCbcd62B1A4eb4C4A397d042a2</div>
-</div>
-
-<div class="card">
-  <h4>主号码（5个，1-30，不能重复）</h4>
-  <input type="number" id="m1" min="1" max="30">
-  <input type="number" id="m2" min="1" max="30">
-  <input type="number" id="m3" min="1" max="30">
-  <input type="number" id="m4" min="1" max="30">
-  <input type="number" id="m5" min="1" max="30">
-  <h4>Bonus号（1 ~ <span id="bMaxLabel">?</span>）</h4>
-  <input type="number" id="b" min="1">
-  <br>
-  <button onclick="submitTicket()">提交自选号码出票</button>
-  <div id="msg"></div>
-</div>
-
-<script>
-const CONTRACT_ADDR = "0x3bAe643002069dBCbcd62B1A4eb4C4A397d042a2";
-const BASE_CHAIN_ID = 8453;
-let provider, signer, contract;
-
-// 最小ABI，只包含我们需要的两个函数
-const ABI = [
-  "function getCurrentBonusMax() view returns (uint8)",
-  "function buyTicket(uint8[5] calldata mainNumbers, uint8 bonus) external"
-];
-
-// 连接钱包
-async function connectWallet() {
-  if(!window.ethereum) return alert("请安装MetaMask");
-  provider = new ethers.BrowserProvider(window.ethereum);
-  const net = await provider.getNetwork();
-  if(net.chainId !== BigInt(BASE_CHAIN_ID)){
-    try{
-      await window.ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{chainId: "0x2105"}]
-      })
-    }catch(e){alert("请切换到Base网络")}
-  }
-  signer = await provider.getSigner();
-  contract = new ethers.Contract(CONTRACT_ADDR, ABI, signer);
-}
-
-async function fetchBonusMax(){
-  if(!contract) await connectWallet();
-  const max = await contract.getCurrentBonusMax();
-  document.getElementById("bonusMax").textContent = max;
-  document.getElementById("bMaxLabel").textContent = max;
-  document.getElementById("b").max = max;
-}
-
-async function submitTicket(){
-  const msgEl = document.getElementById("msg");
-  msgEl.textContent = "";
-  if(!contract) await connectWallet();
-
-  const m = [
-    Number(document.getElementById("m1").value),
-    Number(document.getElementById("m2").value),
-    Number(document.getElementById("m3").value),
-    Number(document.getElementById("m4").value),
-    Number(document.getElementById("m5").value),
-  ]
-  const bonus = Number(document.getElementById("b").value);
-  const bMax = Number(document.getElementById("bonusMax").textContent);
-
-  // 校验
-  for(let v of m){
-    if(isNaN(v) || v<1 || v>30){
-      msgEl.className = "err";
-      msgEl.textContent = "主号码必须是1~30";
-      return;
-    }
-  }
-  if(new Set(m).size !==5){
-    msgEl.className = "err";
-    msgEl.textContent = "5个主号码不能重复";
-    return;
-  }
-  if(isNaN(bonus) || bonus<1 || bonus> bMax){
-    msgEl.className = "err";
-    msgEl.textContent = `Bonus必须 1~${bMax}`;
-    return;
-  }
-  // 合约要求主号升序
-  m.sort((a,b)=>a-b);
-
-  try{
-    msgEl.textContent = "正在发送交易...";
-    const tx = await contract.buyTicket(m, bonus);
-    msgEl.className = "success";
-    msgEl.textContent = `交易已提交：${tx.hash}`;
-    await tx.wait();
-    msgEl.textContent += " | 确认成功";
-  }catch(e){
-    msgEl.className = "err";
-    msgEl.textContent = "失败：" + (e.message.slice(0,200));
-  }
-}
-</script>
-</body>
-</html>
+<header><a class="brand" href="./">megapot<span>●</span></a><button id="connect" class="secondary">连接钱包</button></header>
+<main>
+<div class="intro"><span class="eyebrow">BASE · ONCHAIN LOTTERY</span><h1>你的号码，<br>下一次可能。</h1><p>查看链上开奖，选好你的五个主号码与一个 Bonus 号。</p></div>
+<section class="current"><div><span class="eyebrow">当前 BONUS 上限</span><div class="max" id="bonusMax">—</div><span id="round">正在读取当期状态…</span></div><div class="current-right"><button id="refresh" class="secondary">↻ 刷新上限</button><p id="price">单注票价 — USDC</p><small id="updated">数据来自 Base 合约</small></div></section>
+<p id="globalStatus" role="status" aria-live="polite"></p>
+<div class="grid"><section class="card"><span class="eyebrow">01 / PICK YOUR NUMBERS</span><h2>手动选号</h2><form id="ticketForm" novalidate><fieldset><legend>主号码 <small>5 个不重复的整数 · 1–30</small></legend><div class="numbers">
+<label><span class="sr">主号码 1</span><input id="m1" type="number" min="1" max="30" step="1" required placeholder="—"></label>
+<label><span class="sr">主号码 2</span><input id="m2" type="number" min="1" max="30" step="1" required placeholder="—"></label>
+<label><span class="sr">主号码 3</span><input id="m3" type="number" min="1" max="30" step="1" required placeholder="—"></label>
+<label><span class="sr">主号码 4</span><input id="m4" type="number" min="1" max="30" step="1" required placeholder="—"></label>
+<label><span class="sr">主号码 5</span><input id="m5" type="number" min="1" max="30" step="1" required placeholder="—"></label></div></fieldset>
+<label class="bonus-label" for="bonus">Bonus 号码 <small>1–<span id="bonusLabel">?</span></small></label><input id="bonus" class="bonus-input" type="number" min="1" step="1" required placeholder="—">
+<div class="note">每次提交购买 1 注。额度不足时先授权本注 USDC，再确认购票交易。钱包另需 ETH 支付 Base 网络费。</div><button id="submit" type="submit">提交彩票 →</button><div id="ticketStatus" role="status" aria-live="polite"></div><div id="transactions"></div></form></section>
+<section class="card"><span class="eyebrow">02 / PAST DRAWINGS</span><h2>最近开奖结果</h2><form id="historyForm"><label for="count">查询最近多少期？</label><div class="query"><input id="count" type="number" min="1" max="500" step="1" value="10" required><button id="historyButton">查询开奖</button></div><small>支持 1–500 期，按期号倒序，仅展示已开奖期数。</small></form><p id="historyStatus" role="status" aria-live="polite">查询无需连接钱包。</p><div id="results" class="results"></div></section></div>
+<footer>Base 主网 · <a href="https://basescan.org/address/0x3bAe643002069dBCbcd62B1A4eb4C4A397d042a2#code" target="_blank" rel="noopener noreferrer">查看 Megapot 合约 ↗</a></footer>
+</main></body></html>
