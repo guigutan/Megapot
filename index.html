@@ -11,7 +11,8 @@
 <header><a class="brand" href="./">megapot<span>●</span></a><button id="connect" class="secondary">连接钱包</button></header>
 <main>
 <div class="intro"><span class="eyebrow">BASE · ONCHAIN LOTTERY</span><h1>你的号码，<br>下一次可能。</h1><p>查看链上开奖，选好你的五个主号码与一个 Bonus 号。</p></div>
-<section class="current"><div><span class="eyebrow">当前 BONUS 上限</span><div class="max" id="bonusMax">—</div><span id="round">正在读取当期状态…</span></div><div class="current-right"><button id="refresh" class="secondary">↻ 刷新上限</button><p id="price">单注票价 — USDC</p><small id="updated">数据来自 Base 合约</small></div></section>
+<section class="current"><div><span class="eyebrow">当前 BONUS 上限</span><div class="max" id="bonusMax">—</div><span id="round">正在读取当期状态…</span></div><div class="current-right"><button id="refresh" class="secondary">↻ 刷新当期状态</button><p id="price">单注票价 — USDC</p><small id="updated">数据来自 Base 合约</small></div>
+<div class="drawing-stats"><div><span class="eyebrow">当前期奖金池</span><div class="stat-value"><span id="prizePool">—</span> <small>USDC</small></div><small>当期合约奖金池总额</small></div><div><span class="eyebrow">距离计划开奖</span><div class="stat-value" id="countdown" role="timer" aria-label="距离计划开奖剩余时间">—</div><small id="drawingAt">计划开奖时间 —</small></div></div></section>
 <p id="globalStatus" role="status" aria-live="polite"></p>
 <div class="grid"><section class="card"><span class="eyebrow">01 / PICK YOUR NUMBERS</span><h2>手动选号</h2><form id="ticketForm" novalidate><fieldset><legend>主号码 <small>5 个不重复的整数 · 1–30</small></legend><div class="numbers">
 <label><span class="sr">主号码 1</span><input id="m1" type="number" min="1" max="30" step="1" required placeholder="—"></label>

@@ -14,6 +14,22 @@ const ABI = [
 const TOKEN_ABI = ['function balanceOf(address) view returns (uint256)','function allowance(address,address) view returns (uint256)','function approve(address,uint256) returns (bool)','function decimals() view returns (uint8)','function symbol() view returns (string)'];
 const $ = id => document.getElementById(id);
 let reader, readContract, walletEpoch = 0, purchasing = false;
+let currentDrawingState;
+function countdownText(state, now = Date.now()) {
+ if (!state || Number(state.drawingTime) <= 0) return '—';
+ if (state.winningTicket !== 0n) return '本期已开奖';
+ if (state.jackpotLock) return '开奖处理中';
+ const seconds = Math.max(0, Math.ceil(Number(state.drawingTime) - now / 1000));
+ if (seconds === 0) return '等待链上开奖';
+ const days = Math.floor(seconds / 86400);
+ const hours = Math.floor(seconds % 86400 / 3600);
+ const minutes = Math.floor(seconds % 3600 / 60);
+ const pad = n => String(n).padStart(2, '0');
+ return `${days ? days + '天 ' : ''}${pad(hours)}:${pad(minutes)}:${pad(seconds % 60)}`;
+}
+function updateCountdown() {
+ $('countdown').textContent = countdownText(currentDrawingState);
+}
 function status(id, message, kind = '') { $(id).textContent = message; $(id).className = kind; }
 function errorText(error) {
  if (error.code === 4001 || error.code === 'ACTION_REJECTED') return '已取消钱包请求。';
@@ -35,6 +51,13 @@ async function snapshot(c) {
  return {id, state: await c.getDrawingState(id, {blockTag})};
 }
 function showCurrent({id, state}) {
+ currentDrawingState = state;
+ const [whole, fraction] = ethers.formatUnits(state.prizePool, 6).split('.');
+ $('prizePool').textContent = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (fraction && /[1-9]/.test(fraction) ? `.${fraction}` : '');
+ $('drawingAt').textContent = Number(state.drawingTime) > 0
+  ? `计划开奖：${new Date(Number(state.drawingTime) * 1000).toLocaleString('zh-CN', {timeZoneName:'short'})}`
+  : '计划开奖时间 —';
+ updateCountdown();
  $('bonusMax').textContent = state.bonusballMax.toString();
  $('bonusLabel').textContent = state.bonusballMax.toString();
  $('bonus').max = state.bonusballMax.toString();
@@ -159,3 +182,4 @@ if (window.ethereum?.on) {
  for (const event of ['accountsChanged','chainChanged','disconnect']) window.ethereum.on(event,()=>{ walletEpoch++; $('connect').textContent='重新连接钱包'; });
 }
 refresh();
+window.setInterval(updateCountdown, 1000);
