@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Megapot 自选号调试工具（仅学习）</title>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;font-family:system-ui}
+body{max-width:600px;margin:2rem auto;padding:0 1rem}
+.card{border:1px solid #ccc;padding:1.5rem;border-radius:12px;margin-bottom:1rem}
+input{width:70px;padding:6px;margin:4px}
+button{padding:8px 14px;margin:4px;cursor:pointer}
+.info{color:#3366cc}
+.err{color:#c00}
+.success{color:#090}
+</style>
+</head>
+<body>
+<h2>Megapot 合约调试器（自选号码）</h2>
+<div class="card">
+  <div>当前Bonus上限：<span id="bonusMax">--</span></div>
+  <button onclick="fetchBonusMax()">刷新Bonus上限</button>
+  <div class="info">Base合约：0x3bAe643002069dBCbcd62B1A4eb4C4A397d042a2</div>
+</div>
+
+<div class="card">
+  <h4>主号码（5个，1-30，不能重复）</h4>
+  <input type="number" id="m1" min="1" max="30">
+  <input type="number" id="m2" min="1" max="30">
+  <input type="number" id="m3" min="1" max="30">
+  <input type="number" id="m4" min="1" max="30">
+  <input type="number" id="m5" min="1" max="30">
+  <h4>Bonus号（1 ~ <span id="bMaxLabel">?</span>）</h4>
+  <input type="number" id="b" min="1">
+  <br>
+  <button onclick="submitTicket()">提交自选号码出票</button>
+  <div id="msg"></div>
+</div>
+
+<script>
+const CONTRACT_ADDR = "0x3bAe643002069dBCbcd62B1A4eb4C4A397d042a2";
+const BASE_CHAIN_ID = 8453;
+let provider, signer, contract;
+
+// 最小ABI，只包含我们需要的两个函数
+const ABI = [
+  "function getCurrentBonusMax() view returns (uint8)",
+  "function buyTicket(uint8[5] calldata mainNumbers, uint8 bonus) external"
+];
+
+// 连接钱包
+async function connectWallet() {
+  if(!window.ethereum) return alert("请安装MetaMask");
+  provider = new ethers.BrowserProvider(window.ethereum);
+  const net = await provider.getNetwork();
+  if(net.chainId !== BigInt(BASE_CHAIN_ID)){
+    try{
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{chainId: "0x2105"}]
+      })
+    }catch(e){alert("请切换到Base网络")}
+  }
+  signer = await provider.getSigner();
+  contract = new ethers.Contract(CONTRACT_ADDR, ABI, signer);
+}
+
+async function fetchBonusMax(){
+  if(!contract) await connectWallet();
+  const max = await contract.getCurrentBonusMax();
+  document.getElementById("bonusMax").textContent = max;
+  document.getElementById("bMaxLabel").textContent = max;
+  document.getElementById("b").max = max;
+}
+
+async function submitTicket(){
+  const msgEl = document.getElementById("msg");
+  msgEl.textContent = "";
+  if(!contract) await connectWallet();
+
+  const m = [
+    Number(document.getElementById("m1").value),
+    Number(document.getElementById("m2").value),
+    Number(document.getElementById("m3").value),
+    Number(document.getElementById("m4").value),
+    Number(document.getElementById("m5").value),
+  ]
+  const bonus = Number(document.getElementById("b").value);
+  const bMax = Number(document.getElementById("bonusMax").textContent);
+
+  // 校验
+  for(let v of m){
+    if(isNaN(v) || v<1 || v>30){
+      msgEl.className = "err";
+      msgEl.textContent = "主号码必须是1~30";
+      return;
+    }
+  }
+  if(new Set(m).size !==5){
+    msgEl.className = "err";
+    msgEl.textContent = "5个主号码不能重复";
+    return;
+  }
+  if(isNaN(bonus) || bonus<1 || bonus> bMax){
+    msgEl.className = "err";
+    msgEl.textContent = `Bonus必须 1~${bMax}`;
+    return;
+  }
+  // 合约要求主号升序
+  m.sort((a,b)=>a-b);
+
+  try{
+    msgEl.textContent = "正在发送交易...";
+    const tx = await contract.buyTicket(m, bonus);
+    msgEl.className = "success";
+    msgEl.textContent = `交易已提交：${tx.hash}`;
+    await tx.wait();
+    msgEl.textContent += " | 确认成功";
+  }catch(e){
+    msgEl.className = "err";
+    msgEl.textContent = "失败：" + (e.message.slice(0,200));
+  }
+}
+</script>
+</body>
+</html>
