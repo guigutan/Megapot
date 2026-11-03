@@ -86,11 +86,11 @@ test('failed weight lookup preserves final prizes and distinguishes missing valu
  const table=host.children.find(n=>n.className==='tier-scroll').children[0];
  const rows=table.children[2].children;
  assert.equal(rows.length,12);
- assert.equal(rows[0].children[0].textContent,'5 主号 + Bonus · 头奖');
+ assert.deepEqual(rows.map(row => row.children[0].textContent), ['5+1','5+0','4+1','4+0','3+1','3+0','2+1','2+0','1+1','1+0','0+1','0+0']);
  assert.equal(rows[0].children[1].textContent,'未获取');
  assert.equal(rows[0].children[3].textContent,'1.000001');
  assert.equal(rows[0].children[4].textContent,'0.900001');
- assert.equal(rows[11].children[0].textContent,'0 主号（无 Bonus）');
+ assert.equal(rows[11].children[0].textContent,'0+0');
 });
 test('history automatically loads tier details for every settled drawing',async()=>{
  const {run,context}=app();const ids=[];context.ids=ids;
