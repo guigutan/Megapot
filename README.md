@@ -45,3 +45,11 @@
 权重和最终奖金分别读取，一项失败不影响另一项展示；失败值显示未获取，支持逐期重试，不会当成 0。某期读取失败不会中断后续期数查询。
 
 接口参考：https://github.com/code-423n4/2025-11-megapot/blob/main/contracts/GuaranteedMinimumPayoutCalculator.sol 。未完成实时 RPC 集成验证。
+
+## 领取奖金
+
+“我的中奖彩票”通过官方 `GET https://api.megapot.io/v1/wallets/{account}/wins?claimed=false&limit=10` 分页发现中奖票；支持加载更多、去重、钱包变更清空，以及手动输入十进制 userTicketId 领取。API 金额仅标为索引奖金，不作为交易依据。
+
+单票领取前读取合约的 jackpotNFT 地址，检查 NFT ownerOf/getTicketInfo、已结算期号、链上奖档和最终奖金；模拟 claimWinnings 成功后请求钱包签名，等待回执成功再显示已到账。账户或网络变化会中止尚未发送的请求。无需 USDC 授权；领取与购票互斥。失败或索引延迟时可按彩票 ID 重试。
+
+参考：https://github.com/coordinationlabs/megapot-starter-kit/blob/main/src/lib/api.ts 、https://github.com/coordinationlabs/megapot-starter-kit/blob/main/src/hooks/useClaimWinnings.ts 。未执行实际钱包领取交易或完成实时 RPC/API 集成验证。

@@ -98,3 +98,53 @@ test('history automatically loads tier details for every settled drawing',async(
  run("initReader=()=>contractMock; snapshot=async()=>({id:3n}); loadPastTiers=async(c,id)=>ids.push(id); $('count').value='2'");
  await run('history({preventDefault(){}})');assert.deepEqual(ids,[3n,1n]);
 });
+
+function claimFixture(options={}) {
+ const a=app();const account='0x1111111111111111111111111111111111111111';
+ const state={winningTicket:1n,payoutCalculator:'0x2222222222222222222222222222222222222222',referralWinShare:100000000000000000n};
+ const nft={ownerOf:async()=>options.owner||account,getTicketInfo:async()=>({drawingId:options.round||223n})};
+ a.context.ethers={Contract:class{constructor(address){return address==='nft'?nft:{getDrawingTierPayouts:async()=>Array(12).fill(options.gross??1000001n)}}}};
+ a.context.c={runner:{},jackpotNFT:async()=>'nft',currentDrawingId:async()=>224n,getDrawingState:async()=>state,getTicketTierIds:async()=>[4n]};
+ a.context.account=account;
+ return a;
+}
+test('claim preflight checks owner, settled round, prize and exact net amount',async()=>{
+ const a=claimFixture();const verified=await a.run('verifyClaim(c,account,123n)');
+ assert.equal(verified.net,900001n);assert.equal(verified.tier,4);assert.equal(verified.round,223n);
+ await assert.rejects(()=>claimFixture({owner:'other'}).run('verifyClaim(c,account,123n)'),/持有人/);
+ await assert.rejects(()=>claimFixture({round:224n}).run('verifyClaim(c,account,123n)'),/结算/);
+ await assert.rejects(()=>claimFixture({gross:0n}).run('verifyClaim(c,account,123n)'),/没有可领取/);
+});
+test('ticket IDs preserve uint256 precision and reject malformed values',()=>{
+ const {run}=app();assert.equal(run("ticketIdValue('123456789012345678901234567890')"),123456789012345678901234567890n);
+ for(const value of ['-1','1.5','1e5','0x123','',String(2n**256n)])assert.throws(()=>run(`ticketIdValue('${value}')`));
+});
+test('claim does not send after simulation rejection and restores controls',async()=>{
+ const a=app();let sends=0;
+ const write=async()=>{sends++;};write.staticCall=async()=>{throw Error('already claimed')};
+ a.context.ethers={Contract:class{constructor(){return {claimWinnings:write}}}};
+ a.run("connect=async()=>({account:'wallet',signer:{}});assertWallet=async()=>{};verifyClaim=async()=>({round:223n,tier:4,net:900001n})");
+ await a.run("claimTicket('123')");assert.equal(sends,0);
+ assert.match(a.elements.get('claimStatus').textContent,/already claimed/);
+ assert.equal(a.elements.get('manualClaim').disabled,false);
+});
+test('claim reports success only after receipt and blocks duplicate requests',async()=>{
+ const a=app();let sends=0;let finish;
+ const pending=new Promise(resolve=>{finish=resolve});
+ const write=async()=>{sends++;return {hash:'0xabc',wait:()=>pending}};write.staticCall=async()=>{};
+ a.context.ethers={Contract:class{constructor(){return {claimWinnings:write}}}};
+ a.run("connect=async()=>({account:'wallet',signer:{}});assertWallet=async()=>{};verifyClaim=async()=>({round:223n,tier:4,net:900001n})");
+ const first=a.run("claimTicket('123')");
+ for(let i=0;i<12;i++)await Promise.resolve();
+ await a.run("claimTicket('123')");assert.equal(sends,1);
+ assert.doesNotMatch(a.elements.get('claimStatus').textContent,/领取成功/);
+ finish({status:1});await first;
+ assert.match(a.elements.get('claimStatus').textContent,/领取成功/);
+});
+test('wallet change stops claim before signing',async()=>{
+ const a=app();let sends=0;
+ const write=async()=>{sends++};write.staticCall=async()=>{};
+ a.context.ethers={Contract:class{constructor(){return {claimWinnings:write}}}};
+ a.run("connect=async()=>({account:'wallet',signer:{}});verifyClaim=async()=>({round:223n,tier:4,net:1n});assertWallet=async()=>{throw Error('钱包已改变')}");
+ await a.run("claimTicket('123')");assert.equal(sends,0);assert.match(a.elements.get('claimStatus').textContent,/钱包已改变/);
+});
