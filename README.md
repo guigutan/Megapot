@@ -35,3 +35,13 @@
 `node --test tests/app.test.cjs`
 
 测试覆盖号码校验与历史查询排序、跳过未开奖和部分失败保留。不包含真实钱包签名、实际购票或实时 RPC 集成验证。
+
+## 历史各档奖金
+
+查询历史开奖时自动读取每期 `state.payoutCalculator`，调用 `getDrawingTierInfo(id)` 获取该期冻结的保底配置和各档剩余池权重，以及 `getDrawingTierPayouts(id)` 获取最终每注奖金。展开每期“各档权重与最终奖金”查看全部 12 个档位。
+
+净额按合约领取逻辑计算：`gross - floor(gross * referralWinShare / 1e18)`，保留 USDC 最小单位精度。该分成仍适用于没有推荐人的彩票；无推荐人时分成去向为 LP。表中的每注金额不代表该档实际有玩家中奖。保底资格仅表示配置，不宣称当期结算一定启用保底。
+
+权重和最终奖金分别读取，一项失败不影响另一项展示；失败值显示未获取，支持逐期重试，不会当成 0。某期读取失败不会中断后续期数查询。
+
+接口参考：https://github.com/code-423n4/2025-11-megapot/blob/main/contracts/GuaranteedMinimumPayoutCalculator.sol 。未完成实时 RPC 集成验证。

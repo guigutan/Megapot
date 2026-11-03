@@ -12,6 +12,75 @@ const ABI = [
  'function buyTickets((uint8[] normals,uint8 bonusball)[] tickets,address recipient,address[] referrers,uint256[] referralSplit,bytes32 source) returns (uint256[])'
 ];
 const TOKEN_ABI = ['function balanceOf(address) view returns (uint256)','function allowance(address,address) view returns (uint256)','function approve(address,uint256) returns (bool)','function decimals() view returns (uint8)','function symbol() view returns (string)'];
+const PAYOUT_ABI = [
+ 'function getDrawingTierInfo(uint256) view returns ((uint256 minPayout,uint256 premiumTierMinAllocation,bool[12] minPayoutTiers,uint256[12] premiumTierWeights))',
+ 'function getDrawingTierPayouts(uint256) view returns (uint256[12])'
+];
+const ONE_E18 = 10n ** 18n;
+function formatScaled(value, decimals) {
+ const unit = 10n ** BigInt(decimals);
+ const fraction = (value % unit).toString().padStart(decimals, '0').replace(/0+$/, '');
+ return (value / unit).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (fraction ? `.${fraction}` : '');
+}
+const percent = value => `${formatScaled(value, 16)}%`;
+// Match claimWinnings: subtract the rounded-down share, preserving USDC precision.
+const netPayout = (gross, share) => gross - gross * share / ONE_E18;
+function makeNode(tag, text, className) {
+ const node = document.createElement(tag);
+ if (text !== undefined) node.textContent = text;
+ if (className) node.className = className;
+ return node;
+}
+async function readPastTiers(c, id, state) {
+ if (!state.payoutCalculator || /^0x0{40}$/i.test(state.payoutCalculator)) throw new Error('该期未提供奖金计算合约地址。');
+ const calculator = new ethers.Contract(state.payoutCalculator, PAYOUT_ABI, c.runner);
+ // Read the saved per-round configuration, never today's global weights.
+ const [config, payouts] = await Promise.allSettled([
+  calculator.getDrawingTierInfo(id), calculator.getDrawingTierPayouts(id)
+ ]);
+ return {config: config.status === 'fulfilled' ? config.value : null,
+  payouts: payouts.status === 'fulfilled' ? payouts.value : null,
+  errors: [config, payouts].filter(r => r.status === 'rejected').map(r => errorText(r.reason))};
+}
+function renderPastTiers(host, state, data) {
+ host.replaceChildren();
+ const {config, payouts} = data;
+ if (data.errors.length) host.append(makeNode('p', `部分奖金数据读取失败：${data.errors.join('；')}`, 'error'));
+ if (!config && !payouts) return;
+ const share = state.referralWinShare;
+ host.append(makeNode('p', `当期奖金池 ${formatScaled(state.prizePool, 6)} USDC · 中奖分成 ${percent(share)}`, 'tier-note'));
+ if (config) host.append(makeNode('p', `保底配置：每注 ${formatScaled(config.minPayout, 6)} USDC；高级奖最低预留比例 ${percent(config.premiumTierMinAllocation)}。保底资格不代表本期一定启用保底，最终金额以下表为准。`, 'tier-note'));
+ const wrapper = makeNode('div', undefined, 'tier-scroll');
+ const table = makeNode('table', undefined, 'tier-table');
+ const caption = makeNode('caption', '各档最终每注奖金（USDC）');
+ const head = makeNode('thead'); const titles = makeNode('tr');
+ for (const title of ['命中情况', '剩余池权重', '保底资格', '每注总额', '每注净额']) {
+  const th = makeNode('th', title); th.scope = 'col'; titles.append(th);
+ }
+ head.append(titles); const body = makeNode('tbody');
+ for (let tier = 11; tier >= 0; tier--) {
+  const row = makeNode('tr');
+  const label = `${Math.floor(tier / 2)} 主号${tier % 2 ? ' + Bonus' : '（无 Bonus）'}${tier === 11 ? ' · 头奖' : ''}`;
+  const values = [label, config ? percent(config.premiumTierWeights[tier]) : '未获取',
+   config ? (config.minPayoutTiers[tier] ? '有' : '无') : '未获取',
+   payouts ? formatScaled(payouts[tier], 6) : '未获取',
+   payouts ? formatScaled(netPayout(payouts[tier], share), 6) : '未获取'];
+  values.forEach((text, i) => { const cell = makeNode(i === 0 ? 'th' : 'td', text); if (i === 0) cell.scope = 'row'; row.append(cell); });
+  body.append(row);
+ }
+ table.append(caption, head, body); wrapper.append(table); host.append(wrapper);
+ host.append(makeNode('p', '权重针对扣除保底后的剩余奖金池，不是整个奖金池占比。总额取自该期最终结算；净额扣除当期中奖分成，未扣网络费。每注金额不代表该档实际有玩家中奖。', 'tier-note'));
+ const source = makeNode('a', '查看该期奖金计算合约 ↗');
+ source.href = `https://basescan.org/address/${state.payoutCalculator}#readContract`;
+ source.target = '_blank'; source.rel = 'noopener noreferrer'; host.append(source);
+}
+async function loadPastTiers(c, id, state, host) {
+ host.replaceChildren(makeNode('p', '正在读取该期各档权重与最终奖金…'));
+ try { renderPastTiers(host, state, await readPastTiers(c, id, state)); }
+ catch (e) { host.replaceChildren(makeNode('p', `奖金数据读取失败：${errorText(e)}`, 'error')); }
+ const retry = makeNode('button', '重新读取奖金', 'secondary'); retry.type = 'button';
+ retry.addEventListener('click', () => loadPastTiers(c, id, state, host)); host.append(retry);
+}
 const $ = id => document.getElementById(id);
 let reader, readContract, walletEpoch = 0, purchasing = false;
 let currentDrawingState;
@@ -154,7 +223,11 @@ function renderResult(id, state, ticket) {
  heading.textContent = `第 ${id} 期 · ${new Date(Number(state.drawingTime)*1000).toLocaleString('zh-CN')}（计划开奖）`;
  const balls = document.createElement('div'); balls.className = 'balls';
  [...ticket.normals, ticket.bonusball].forEach((n,i) => { const b = document.createElement('span'); b.className = `ball${i===5?' bonus':''}`; b.textContent = n.toString(); b.title = i===5?'Bonus 号码':'主号码'; balls.append(b); });
- row.append(heading,balls); $('results').append(row);
+ const details = makeNode('details', undefined, 'tier-details');
+ details.append(makeNode('summary', '各档权重与最终奖金'));
+ const host = makeNode('div'); details.append(host);
+ row.append(heading,balls,details); $('results').append(row);
+ return host;
 }
 async function history(event) {
  event.preventDefault(); const count = Number($('count').value);
@@ -168,7 +241,8 @@ async function history(event) {
    const state = await c.getDrawingState(id);
    if (state.winningTicket === 0n) continue;
    const ticket = await c.getUnpackedTicket(id, state.winningTicket);
-   renderResult(id, state, ticket); found++;
+   const host = renderResult(id, state, ticket); found++;
+   await loadPastTiers(c, id, state, host);
   }
   status('historyStatus', found ? `已展示最近 ${found} 期${found<count?'（已到最早可用期数）':''}。` : '暂无已开奖期数。');
  } catch (e) { status('historyStatus', `查询中断，已保留 ${found} 期：${errorText(e)}`, 'error'); }
