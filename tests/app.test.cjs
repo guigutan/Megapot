@@ -183,3 +183,36 @@ test('one stale ticket aborts the entire batch before sending',async()=>{
  await a.run("claimTickets(['1','2'])");assert.equal(sends,0);assert.match(a.elements.get('claimStatus').textContent,/已领取/);
  assert.equal(a.elements.get('manualClaim').disabled,false);
 });
+
+test('purchase record states distinguish pending, losing, unclaimed and claimed tickets',()=>{
+ const {run}=app();
+ assert.equal(run('recordOutcome({matched_normals:null,bonusball_match:null,winnings_amount:null})'),'待开奖 / 待索引更新');
+ assert.equal(run("recordOutcome({matched_normals:1,bonusball_match:false,winnings_amount:{amount:'0',decimals:6}})"),'1+0 · 未中奖');
+ assert.equal(run("recordOutcome({matched_normals:2,bonusball_match:false,claimed:false,winnings_amount:{amount:'1000001',decimals:6}})"),'2+0 · 待领取 · 索引奖金 1.000001 USDC');
+ assert.match(run("recordOutcome({matched_normals:5,bonusball_match:true,claimed:true,winnings_amount:{amount:'123456789',decimals:6}})"),/已领取/);
+});
+test('purchase records paginate using cursor, deduplicate and reject other wallets',async()=>{
+ const a=app();const cursors=[],rendered=[];
+ a.context.getPage=async(account,cursor)=>{cursors.push(cursor);return cursor===null ? {data:[{wallet:'wallet',user_ticket_id:'1'}],has_more:true,next_cursor:'page2'} : {data:[{wallet:'wallet',user_ticket_id:'1'},{wallet:'wallet',user_ticket_id:'2'},{wallet:'other',user_ticket_id:'3'}],has_more:false,next_cursor:null}};
+ a.context.rendered=rendered;
+ a.run("connectedWallet={account:'wallet',epoch:0};connect=async()=>connectedWallet;assertWallet=async()=>{};fetchRecords=getPage;renderRecord=t=>rendered.push(t.user_ticket_id)");
+ await a.run('queryRecords()');assert.equal(a.elements.get('recordsMore').hidden,false);
+ await a.run('queryRecords(true)');assert.deepEqual(cursors,[null,'page2']);assert.deepEqual(rendered,['1','2']);
+ assert.equal(a.elements.get('recordsMore').hidden,true);assert.match(a.elements.get('recordsStatus').textContent,/2 张/);
+});
+test('purchase records discard responses invalidated by a wallet switch',async()=>{
+ const a=app();let finish;const rendered=[];
+ a.context.getPage=()=>new Promise(resolve=>{finish=resolve});a.context.rendered=rendered;
+ a.run("connectedWallet={account:'old',epoch:0};connect=async()=>connectedWallet;assertWallet=async()=>{};fetchRecords=getPage;renderRecord=t=>rendered.push(t.user_ticket_id)");
+ const request=a.run('queryRecords()');await Promise.resolve();await Promise.resolve();
+ a.run('connectedWallet=null;resetRecords()');
+ finish({data:[{wallet:'old',user_ticket_id:'1'}],has_more:false,next_cursor:null});await request;
+ assert.deepEqual(rendered,[]);assert.equal(a.elements.get('recordsQuery').hidden,true);
+});
+test('record refresh failure preserves already loaded pages and unlocks controls',async()=>{
+ const a=app();
+ a.run("connectedWallet={account:'wallet',epoch:0};connect=async()=>connectedWallet;assertWallet=async()=>{};fetchRecords=async()=>({data:[{wallet:'wallet',user_ticket_id:'1',round_id:'223',normals:[1,2,3,4,5],bonusball:1,matched_normals:null,bonusball_match:null,winnings_amount:null}],has_more:true,next_cursor:'next'})");
+ await a.run('queryRecords()');a.run("fetchRecords=async()=>{throw Error('限流')}");await a.run('queryRecords(true)');
+ assert.equal(a.elements.get('purchaseRecords').children.length,1);assert.match(a.elements.get('recordsStatus').textContent,/限流/);
+ assert.equal(a.elements.get('recordsMore').disabled,false);
+});

@@ -24,6 +24,76 @@ const NFT_ABI = ['function ownerOf(uint256) view returns (address)', 'function g
 let claimBusy = false, winsBusy = false, winsSession = null;
 let connectedWallet = null, winsReloadRequested = false;
 const winRows = new Map();
+let recordsBusy = false, recordsSession = null, recordsReloadRequested = false;
+function resetRecords() {
+ recordsSession = null; $('purchaseRecords').replaceChildren(); $('recordsMore').hidden = true;
+ $('recordsQuery').hidden = !connectedWallet;
+ $('recordsAccount').textContent = '连接右上角钱包后自动显示购彩记录。';
+ status('recordsStatus','');
+}
+function scheduleRecords() {
+ if (!connectedWallet) return;
+ if (recordsBusy) { recordsReloadRequested = true; return; }
+ void queryRecords();
+}
+async function fetchRecords(account, cursor) {
+ const url = new URL(`https://api.megapot.io/v1/wallets/${account}/tickets`);
+ url.searchParams.set('limit','20'); if (cursor) url.searchParams.set('cursor',cursor);
+ const response = await fetch(url,{headers:{Accept:'application/json'},signal:AbortSignal.timeout(15000)});
+ if (!response.ok) throw new Error(response.status === 429 ? '查询频率受限，请稍后刷新。' : `购彩记录查询失败（HTTP ${response.status}），请重试。`);
+ const page = await response.json();
+ if (!Array.isArray(page.data) || typeof page.has_more !== 'boolean' || (page.has_more && typeof page.next_cursor !== 'string')) throw new Error('购彩记录接口返回格式异常。');
+ return page;
+}
+function recordOutcome(ticket) {
+ if (ticket.matched_normals === null || ticket.bonusball_match === null || !ticket.winnings_amount) return '待开奖 / 待索引更新';
+ const hit = `${ticket.matched_normals}+${ticket.bonusball_match ? 1 : 0}`;
+ const amount = ticket.winnings_amount;
+ if (amount.decimals !== 6 || !/^[0-9]+$/.test(amount.amount)) return `${hit} · 奖金数据待更新`;
+ const gross = BigInt(amount.amount);
+ return gross > 0n ? `${hit} · ${ticket.claimed ? '已领取' : '待领取'} · 索引奖金 ${formatScaled(gross,6)} USDC` : `${hit} · 未中奖`;
+}
+function renderRecord(ticket) {
+ const row = makeNode('div',undefined,'win-row');
+ row.append(makeNode('strong',`第 ${ticket.round_id} 期`));
+ row.append(makeNode('p',`主号 ${ticket.normals.join('、')} · Bonus ${ticket.bonusball}`));
+ row.append(makeNode('p',recordOutcome(ticket)));
+ row.append(makeNode('p',`彩票 ID：${ticketIdValue(ticket.user_ticket_id)}`,'ticket-id'));
+ const date = new Date(ticket.created_at);
+ if (Number.isFinite(date.getTime())) row.append(makeNode('p',`购票时间：${date.toLocaleString('zh-CN')}`,'tier-note'));
+ for (const [label, hash] of [['购票交易',ticket.tx_hash],['领取交易',ticket.claimed_tx_hash]]) {
+  if (!/^0x[0-9a-f]{64}$/i.test(hash || '')) continue;
+  const a=makeNode('a',`${label} ↗`); a.href=`https://basescan.org/tx/${hash}`;a.target='_blank';a.rel='noopener noreferrer'; row.append(a);
+ }
+ $('purchaseRecords').append(row);
+}
+async function queryRecords(more = false) {
+ if (recordsBusy || !connectedWallet) return;
+ recordsBusy=true; $('recordsQuery').disabled=true; $('recordsMore').disabled=true;
+ let session;
+ try {
+  const w = await connect(false);
+  if (!more) { resetRecords(); recordsSession={account:w.account,epoch:w.epoch,cursor:null,seen:new Set()}; }
+  session=recordsSession;
+  if (!session || session.account.toLowerCase()!==w.account.toLowerCase() || session.epoch!==w.epoch) throw new Error('钱包已改变，请重新查询。');
+  $('recordsAccount').textContent=`查询钱包：${w.account}`;
+  status('recordsStatus','正在加载购彩记录…');
+  const page=await fetchRecords(w.account,session.cursor); await assertWallet(w);
+  if(recordsSession!==session) return;
+  for(const ticket of page.data) {
+   if(ticket.wallet?.toLowerCase()!==w.account.toLowerCase()) continue;
+   const id=ticketIdValue(ticket.user_ticket_id).toString();
+   if(!session.seen.has(id)){renderRecord(ticket);session.seen.add(id);}
+  }
+  const previous=session.cursor;session.cursor=page.next_cursor;
+  $('recordsMore').hidden=!page.has_more || previous===session.cursor;
+  status('recordsStatus',session.seen.size ? `已加载 ${session.seen.size} 张彩票。刚购票或领取后，索引可能延迟，请稍后刷新。` : '暂无该钱包的彩票记录，刚购票可稍后刷新。');
+ } catch(e){if (!session || recordsSession===session) status('recordsStatus',errorText(e),'error');}
+ finally {
+  recordsBusy=false; $('recordsQuery').disabled=false; $('recordsMore').disabled=false;
+  if(recordsReloadRequested){recordsReloadRequested=false;scheduleRecords();}
+ }
+}
 function scheduleWins() {
  if (!connectedWallet) return;
  if (winsBusy || claimBusy) { winsReloadRequested = true; return; }
@@ -143,6 +213,7 @@ async function claimTickets(values, button, row) {
   const link = makeNode('a',`领取交易：${tx.hash}`); link.href=`https://basescan.org/tx/${tx.hash}`; link.target='_blank'; link.rel='noopener noreferrer'; $('claimTransactions').append(link);
   status('claimStatus','领取交易已提交，等待链上确认…'); await confirmed(tx);
   success = true;
+  scheduleRecords();
   for (const id of ids) {
    const item = winRows.get(id.toString());
    if (item) { item.check.checked=false; item.check.disabled=true; item.button.disabled=true; item.row.append(makeNode('p','领取成功','success')); }
@@ -291,7 +362,7 @@ async function connect(autoLoad = true) {
  if (!window.ethereum) throw new Error('请安装 MetaMask 或其他兼容的浏览器钱包。');
  if (connectedWallet) {
   try { await assertWallet(connectedWallet); return connectedWallet; }
-  catch { connectedWallet=null; resetWins(); }
+  catch { connectedWallet=null; resetWins(); resetRecords(); }
  }
  const accounts = await window.ethereum.request({method:'eth_accounts'});
  if (!accounts.length) await window.ethereum.request({method: 'eth_requestAccounts'});
@@ -304,7 +375,8 @@ async function connect(autoLoad = true) {
  $('connect').textContent = `${account.slice(0,6)}…${account.slice(-4)}`;
  connectedWallet = {provider, signer, account, epoch: walletEpoch};
  $('winsQuery').hidden=false; $('batchClaim').hidden=false;
- if (autoLoad) scheduleWins();
+ $('recordsQuery').hidden=false;
+ if (autoLoad) { scheduleWins(); scheduleRecords(); }
  return connectedWallet;
 }
 async function restoreWallet() {
@@ -370,6 +442,7 @@ async function submit(event) {
   status('ticketStatus', '购票交易已提交，等待链上确认…'); await confirmed(tx);
   status('ticketStatus', `购票成功！提交期号 ${initial.id}，主号 ${ticket.normals.join('、')}，Bonus ${bonus}。`, 'success');
   await refresh();
+  scheduleRecords();
  } catch (e) { status('ticketStatus', errorText(e), 'error'); }
  finally { purchasing = false; $('submit').disabled = false; fields.forEach(id => $(id).disabled = false); }
 }
@@ -409,11 +482,13 @@ $('connect').addEventListener('click',async()=>{ try { await connect(); } catch(
 $('ticketForm').addEventListener('submit',submit);
 $('historyForm').addEventListener('submit',history);
 $('winsQuery').addEventListener('click',()=>queryWins());
+$('recordsQuery').addEventListener('click',()=>queryRecords());
+$('recordsMore').addEventListener('click',()=>queryRecords(true));
 $('winsMore').addEventListener('click',()=>queryWins(true));
 $('batchClaim').addEventListener('click',()=>claimTickets([...winRows.entries()].filter(([,item])=>item.check.checked&&!item.check.disabled).map(([id])=>id)));
 $('claimForm').addEventListener('submit',event=>{event.preventDefault();claimTicket($('claimTicketId').value.trim(),$('manualClaim'));});
 if (window.ethereum?.on) {
- for (const event of ['accountsChanged','chainChanged','disconnect']) window.ethereum.on(event,()=>{ walletEpoch++; connectedWallet=null; resetWins(); $('connect').textContent='连接钱包'; if(event!=='disconnect') void restoreWallet(); });
+ for (const event of ['accountsChanged','chainChanged','disconnect']) window.ethereum.on(event,()=>{ walletEpoch++; connectedWallet=null; resetWins(); resetRecords(); $('connect').textContent='连接钱包'; if(event!=='disconnect') void restoreWallet(); });
 }
 refresh();
 window.setInterval(updateCountdown, 1000);
