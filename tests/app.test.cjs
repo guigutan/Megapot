@@ -148,3 +148,38 @@ test('wallet change stops claim before signing',async()=>{
  a.run("connect=async()=>({account:'wallet',signer:{}});verifyClaim=async()=>({round:223n,tier:4,net:1n});assertWallet=async()=>{throw Error('钱包已改变')}");
  await a.run("claimTicket('123')");assert.equal(sends,0);assert.match(a.elements.get('claimStatus').textContent,/钱包已改变/);
 });
+
+test('cached wallet is reused without requesting access again and triggers one automatic query',async()=>{
+ const a=app();let prompts=0,queries=0,signers=0;
+ const account='0x1111111111111111111111111111111111111111';
+ a.context.window.ethereum={request:async({method})=>{if(method==='eth_accounts')return [account];if(method==='eth_chainId')return '0x2105';prompts++;throw Error('unexpected prompt')}};
+ a.context.ethers={BrowserProvider:class{async getSigner(){signers++;return {getAddress:async()=>account}}}};
+ a.context.loaded=()=>{queries++};a.run('queryWins=async()=>loaded()');
+ await a.run('connect()');await a.run('connect()');
+ assert.equal(prompts,0);assert.equal(signers,1);assert.equal(queries,1);
+ assert.equal(a.elements.get('winsQuery').hidden,false);
+});
+test('batch IDs deduplicate and enforce 50-ticket maximum',()=>{
+ const a=app();assert.equal(a.run("batchIds(['1','1','2']).join(',')"),'1,2');
+ assert.throws(()=>a.run('batchIds([])'),/1–50/);
+ assert.throws(()=>a.run('batchIds(Array.from({length:51},(_,i)=>i))'),/1–50/);
+});
+test('cross-round batch verifies every ticket and sends exactly one transaction',async()=>{
+ const a=app();const verified=[],simulations=[],sent=[];
+ const write=async ids=>{sent.push([...ids]);return {hash:'0xabc',wait:async()=>({status:1})}};
+ write.staticCall=async ids=>simulations.push([...ids]);
+ a.context.ethers={Contract:class{constructor(){return {claimWinnings:write}}}};
+ a.context.record=id=>verified.push(id);
+ a.run("connect=async()=>({account:'wallet',signer:{}});assertWallet=async()=>{};verifyClaim=async(c,account,id)=>{record(id);return {round:id,tier:4,net:1000000n}}");
+ await a.run("claimTickets(['222','223'])");
+ assert.deepEqual(verified,[222n,223n]);assert.deepEqual(simulations,[[222n,223n]]);assert.deepEqual(sent,[[222n,223n]]);
+ assert.match(a.elements.get('claimStatus').textContent,/领取成功/);
+});
+test('one stale ticket aborts the entire batch before sending',async()=>{
+ const a=app();let sends=0;
+ const write=async()=>{sends++};write.staticCall=async()=>{};
+ a.context.ethers={Contract:class{constructor(){return {claimWinnings:write}}}};
+ a.run("connect=async()=>({account:'wallet',signer:{}});assertWallet=async()=>{};verifyClaim=async(c,account,id)=>{if(id===2n)throw Error('已领取');return {net:1n}}");
+ await a.run("claimTickets(['1','2'])");assert.equal(sends,0);assert.match(a.elements.get('claimStatus').textContent,/已领取/);
+ assert.equal(a.elements.get('manualClaim').disabled,false);
+});

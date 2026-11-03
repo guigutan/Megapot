@@ -53,3 +53,7 @@
 单票领取前读取合约的 jackpotNFT 地址，检查 NFT ownerOf/getTicketInfo、已结算期号、链上奖档和最终奖金；模拟 claimWinnings 成功后请求钱包签名，等待回执成功再显示已到账。账户或网络变化会中止尚未发送的请求。无需 USDC 授权；领取与购票互斥。失败或索引延迟时可按彩票 ID 重试。
 
 参考：https://github.com/coordinationlabs/megapot-starter-kit/blob/main/src/lib/api.ts 、https://github.com/coordinationlabs/megapot-starter-kit/blob/main/src/hooks/useClaimWinnings.ts 。未执行实际钱包领取交易或完成实时 RPC/API 集成验证。
+
+钱包连接由页面共用：顶部连接后自动加载未领取彩票，后续查询/购票/领取复用连接。刷新页面时只在钱包已授权且位于 Base 时静默恢复，不自动请求授权或切链。
+
+中奖票支持勾选并跨期合并领取，每笔最多 50 张，默认勾选首次加载的前 50 张；更多票需加载后选择。逐张链上核验并合计净奖金后，只模拟并发送一次 claimWinnings(ticketIds)。某张失效则整个批次停止，可刷新列表后重试。合并可减少重复交易开销，但不保证固定节省比例，以钱包估算网络费为准。

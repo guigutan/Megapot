@@ -25,8 +25,10 @@
 <section class="card"><span class="eyebrow">02 / PAST DRAWINGS</span><h2>最近开奖结果</h2><form id="historyForm"><label for="count">查询最近多少期？</label><div class="query"><input id="count" type="number" min="1" max="500" step="1" value="10" required><button id="historyButton">查询开奖</button></div><small>支持 1–500 期，按期号倒序，仅展示已开奖期数。</small></form><p id="historyStatus" role="status" aria-live="polite">查询无需连接钱包。</p><div id="results" class="results"></div></section></div>
 <section class="card claim-card"><span class="eyebrow">03 / CLAIM YOUR WINNINGS</span><h2>我的中奖彩票</h2>
 <p>连接持有彩票的钱包，查询并领取 USDC 奖金。领取无需 USDC 授权，仅需少量 Base ETH 支付网络费。</p>
-<button id="winsQuery" type="button">连接钱包并查询未领取奖金</button>
-<p id="winsAccount" class="ticket-id">请连接钱包后查询。</p>
+<button id="winsQuery" type="button" class="secondary" hidden>刷新待领取彩票</button>
+<p id="winsAccount" class="ticket-id">请使用右上角连接钱包，连接后自动显示待领取彩票。</p>
+<p class="note">可勾选不同期的彩票合并领取，每笔最多 50 张。合并为一次交易可减少重复开销，实际网络费以钱包估算为准。更多彩票请先“加载更多”，本次只领取已选中的彩票。</p>
+<button id="batchClaim" type="button" hidden disabled>合并领取已选 0 张</button>
 <div id="wins"></div><button id="winsMore" type="button" class="secondary" hidden>加载更多</button>
 <details class="tier-details"><summary>使用彩票 ID 领取</summary><p>输入购票交易 TicketPurchased 事件中的 userTicketId（十进制彩票 ID，不是期号）。领取前会检查持有人和实际奖金。</p>
 <form id="claimForm"><label for="claimTicketId">彩票 ID</label><div class="query"><input id="claimTicketId" type="text" inputmode="numeric" pattern="[0-9]+" required placeholder="输入十进制彩票 ID"><button id="manualClaim" type="submit">核验并领取</button></div></form></details>

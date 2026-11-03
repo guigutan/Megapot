@@ -22,6 +22,23 @@ const PAYOUT_ABI = [
 const ONE_E18 = 10n ** 18n;
 const NFT_ABI = ['function ownerOf(uint256) view returns (address)', 'function getTicketInfo(uint256) view returns ((uint256 drawingId,uint256 packedTicket,bytes32 referralScheme))'];
 let claimBusy = false, winsBusy = false, winsSession = null;
+let connectedWallet = null, winsReloadRequested = false;
+const winRows = new Map();
+function scheduleWins() {
+ if (!connectedWallet) return;
+ if (winsBusy || claimBusy) { winsReloadRequested = true; return; }
+ void queryWins();
+}
+function updateBatchButton() {
+ const count = [...winRows.values()].filter(item => item.check.checked && !item.check.disabled).length;
+ $('batchClaim').textContent = `合并领取已选 ${count} 张`;
+ $('batchClaim').disabled = claimBusy || winsBusy || count === 0 || count > 50;
+}
+function batchIds(values) {
+ const ids = [...new Set(values.map(v => ticketIdValue(String(v)).toString()))].map(BigInt);
+ if (!ids.length || ids.length > 50) throw new Error('每笔交易请选择 1–50 张彩票。');
+ return ids;
+}
 function ticketIdValue(value) {
  if (!/^[0-9]+$/.test(value)) throw new Error('彩票 ID 必须是非负十进制整数。');
  const id = BigInt(value);
@@ -29,8 +46,10 @@ function ticketIdValue(value) {
  return id;
 }
 function resetWins() {
+ winRows.clear(); updateBatchButton();
  winsSession = null; $('wins').replaceChildren(); $('winsMore').hidden = true;
- $('winsAccount').textContent = '请连接钱包后查询。';
+ $('winsQuery').hidden = !connectedWallet; $('batchClaim').hidden = !connectedWallet;
+ $('winsAccount').textContent = '请使用右上角连接钱包，连接后自动显示待领取彩票。';
 }
 async function fetchWins(account, cursor) {
  const url = new URL(`https://api.megapot.io/v1/wallets/${account}/wins`);
@@ -45,17 +64,21 @@ async function fetchWins(account, cursor) {
 function renderWin(win) {
  const id = ticketIdValue(win.user_ticket_id);
  const row = makeNode('div', undefined, 'win-row');
+ const label = makeNode('label', undefined, 'win-select'); const check = makeNode('input'); check.type='checkbox'; check.checked=winRows.size<50;
+ label.append(check, makeNode('span','合并领取')); row.append(label);
+ check.addEventListener('change',updateBatchButton);
  row.append(makeNode('strong', `第 ${win.round_id} 期 · ${win.matched_normals}+${win.bonusball_match ? 1 : 0}`));
  row.append(makeNode('p', `彩票 ID：${id}`, 'ticket-id'));
  if (win.amount?.decimals === 6 && /^[0-9]+$/.test(win.amount.amount)) row.append(makeNode('p', `索引奖金：${formatScaled(BigInt(win.amount.amount),6)} USDC（领取前核验实际净额）`));
  const button = makeNode('button', '核验并领取'); button.type = 'button';
  button.addEventListener('click', () => claimTicket(id, button, row)); row.append(button); $('wins').append(row);
+ winRows.set(id.toString(), {check, button, row}); updateBatchButton();
 }
 async function queryWins(more = false) {
  if (winsBusy || claimBusy) return;
  winsBusy = true; $('winsQuery').disabled = true; $('winsMore').disabled = true;
  try {
-  const w = await connect();
+  const w = await connect(false);
   if (!more) { resetWins(); winsSession = {account:w.account, epoch:w.epoch, cursor:null, seen:new Set()}; }
   const session = winsSession;
   if (!session || session.account.toLowerCase() !== w.account.toLowerCase() || session.epoch !== w.epoch) throw new Error('钱包已改变，请重新查询。');
@@ -73,7 +96,10 @@ async function queryWins(more = false) {
   $('winsMore').hidden = !page.has_more || session.cursor === previous;
   status('claimStatus', session.seen.size ? `已加载 ${session.seen.size} 张未领取中奖票。索引可能延迟，领取时以链上状态为准。` : '索引暂无未领取中奖票；如刚开奖，可稍后刷新或输入彩票 ID。');
  } catch (e) { status('claimStatus',errorText(e),'error'); }
- finally { winsBusy=false; $('winsQuery').disabled=false; $('winsMore').disabled=false; }
+ finally {
+  winsBusy=false; $('winsQuery').disabled=false; $('winsMore').disabled=false; updateBatchButton();
+  if (winsReloadRequested) { winsReloadRequested=false; scheduleWins(); }
+ }
 }
 async function verifyClaim(c, account, id) {
  const nft = new ethers.Contract(await c.jackpotNFT(), NFT_ABI, c.runner);
@@ -91,29 +117,44 @@ async function verifyClaim(c, account, id) {
  return {round:info.drawingId, tier, net};
 }
 async function claimTicket(value, button, row) {
+ return claimTickets([value], button, row);
+}
+async function claimTickets(values, button, row) {
  if (claimBusy || winsBusy || purchasing) return;
  claimBusy = true; if (button) button.disabled = true;
+ updateBatchButton();
  $('winsQuery').disabled=true; $('winsMore').disabled=true; $('manualClaim').disabled=true; $('submit').disabled=true;
  let success = false;
  try {
-  const id = ticketIdValue(String(value));
+  const ids = batchIds(values);
   status('claimStatus','正在核验彩票持有人和链上奖金…');
-  const w = await connect(); const c = new ethers.Contract(ADDRESS, ABI, w.signer);
-  const verified = await verifyClaim(c, w.account, id);
+  const w = await connect(false); const c = new ethers.Contract(ADDRESS, ABI, w.signer);
+  let total = 0n;
+  for (const id of ids) {
+   status('claimStatus',`正在核验彩票 ${id}（共 ${ids.length} 张）…`);
+   const verified = await verifyClaim(c, w.account, id); total += verified.net;
+   await assertWallet(w);
+  }
   await assertWallet(w);
-  status('claimStatus',`第 ${verified.round} 期，${Math.floor(verified.tier/2)}+${verified.tier%2}，可领净额 ${formatScaled(verified.net,6)} USDC。正在模拟领取…`);
-  await c.claimWinnings.staticCall([id]); await assertWallet(w);
-  status('claimStatus',`请在钱包确认领取 ${formatScaled(verified.net,6)} USDC；仅需支付 Base 网络费，无需 USDC 授权。`);
-  const tx = await c.claimWinnings([id]);
+  status('claimStatus',`${ids.length} 张彩票合计可领 ${formatScaled(total,6)} USDC，正在模拟合并领取…`);
+  await c.claimWinnings.staticCall(ids); await assertWallet(w);
+  status('claimStatus',`请在钱包确认一次领取 ${ids.length} 张彩票，共 ${formatScaled(total,6)} USDC；无需 USDC 授权。`);
+  const tx = await c.claimWinnings(ids);
   const link = makeNode('a',`领取交易：${tx.hash}`); link.href=`https://basescan.org/tx/${tx.hash}`; link.target='_blank'; link.rel='noopener noreferrer'; $('claimTransactions').append(link);
   status('claimStatus','领取交易已提交，等待链上确认…'); await confirmed(tx);
   success = true;
+  for (const id of ids) {
+   const item = winRows.get(id.toString());
+   if (item) { item.check.checked=false; item.check.disabled=true; item.button.disabled=true; item.row.append(makeNode('p','领取成功','success')); }
+  }
   if (row) row.append(makeNode('p','领取成功','success'));
   status('claimStatus',`领取成功，USDC 已由合约转入钱包 ${w.account}。可重新查询剩余未领取彩票。`,'success');
  } catch(e) { status('claimStatus', `领取失败：${errorText(e)}`,'error'); }
  finally {
   claimBusy=false; if(button) button.disabled=success;
   $('winsQuery').disabled=false; $('winsMore').disabled=false; $('manualClaim').disabled=false; $('submit').disabled=false;
+  updateBatchButton();
+  if (winsReloadRequested) { winsReloadRequested=false; scheduleWins(); }
  }
 }
 function formatScaled(value, decimals) {
@@ -246,9 +287,14 @@ function validateTicket(normals, bonusball, max, ballMax = 30) {
  if (!Number.isInteger(bonusball) || bonusball < 1 || bonusball > max) throw new Error(`Bonus 号码必须是 1–${max} 的整数。`);
  return {normals: [...normals].sort((a,b) => a-b), bonusball};
 }
-async function connect() {
+async function connect(autoLoad = true) {
  if (!window.ethereum) throw new Error('请安装 MetaMask 或其他兼容的浏览器钱包。');
- await window.ethereum.request({method: 'eth_requestAccounts'});
+ if (connectedWallet) {
+  try { await assertWallet(connectedWallet); return connectedWallet; }
+  catch { connectedWallet=null; resetWins(); }
+ }
+ const accounts = await window.ethereum.request({method:'eth_accounts'});
+ if (!accounts.length) await window.ethereum.request({method: 'eth_requestAccounts'});
  const chain = await window.ethereum.request({method: 'eth_chainId'});
  if (chain !== '0x2105') await window.ethereum.request({method: 'wallet_switchEthereumChain', params: [{chainId:'0x2105'}]});
  if (await window.ethereum.request({method:'eth_chainId'}) !== '0x2105') throw new Error('请切换到 Base 主网。');
@@ -256,7 +302,18 @@ async function connect() {
  const signer = await provider.getSigner();
  const account = await signer.getAddress();
  $('connect').textContent = `${account.slice(0,6)}…${account.slice(-4)}`;
- return {provider, signer, account, epoch: walletEpoch};
+ connectedWallet = {provider, signer, account, epoch: walletEpoch};
+ $('winsQuery').hidden=false; $('batchClaim').hidden=false;
+ if (autoLoad) scheduleWins();
+ return connectedWallet;
+}
+async function restoreWallet() {
+ if (!window.ethereum) return;
+ try {
+  const accounts = await window.ethereum.request({method:'eth_accounts'});
+  const chain = await window.ethereum.request({method:'eth_chainId'});
+  if (accounts.length && chain === '0x2105') await connect();
+ } catch { /* A locked or disconnected wallet stays disconnected. */ }
 }
 async function assertWallet(w) {
  const accounts = await window.ethereum.request({method:'eth_accounts'});
@@ -353,9 +410,11 @@ $('ticketForm').addEventListener('submit',submit);
 $('historyForm').addEventListener('submit',history);
 $('winsQuery').addEventListener('click',()=>queryWins());
 $('winsMore').addEventListener('click',()=>queryWins(true));
+$('batchClaim').addEventListener('click',()=>claimTickets([...winRows.entries()].filter(([,item])=>item.check.checked&&!item.check.disabled).map(([id])=>id)));
 $('claimForm').addEventListener('submit',event=>{event.preventDefault();claimTicket($('claimTicketId').value.trim(),$('manualClaim'));});
 if (window.ethereum?.on) {
- for (const event of ['accountsChanged','chainChanged','disconnect']) window.ethereum.on(event,()=>{ walletEpoch++; resetWins(); $('connect').textContent='重新连接钱包'; });
+ for (const event of ['accountsChanged','chainChanged','disconnect']) window.ethereum.on(event,()=>{ walletEpoch++; connectedWallet=null; resetWins(); $('connect').textContent='连接钱包'; if(event!=='disconnect') void restoreWallet(); });
 }
 refresh();
 window.setInterval(updateCountdown, 1000);
+void restoreWallet();
