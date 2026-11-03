@@ -14,12 +14,12 @@
 <section class="current"><div><span class="eyebrow">当前 BONUS 上限</span><div class="max" id="bonusMax">—</div><span id="round">正在读取当期状态…</span></div><div class="current-right"><button id="refresh" class="secondary">↻ 刷新当期状态</button><p id="price">单注票价 — USDC</p><small id="updated">数据来自 Base 合约</small></div>
 <div class="drawing-stats"><div><span class="eyebrow">当前期奖金池</span><div class="stat-value"><span id="prizePool">—</span> <small>USDC</small></div><small>当期合约奖金池总额</small></div><div><span class="eyebrow">距离计划开奖</span><div class="stat-value" id="countdown" role="timer" aria-label="距离计划开奖剩余时间">—</div><small id="drawingAt">计划开奖时间 —</small></div></div></section>
 <p id="globalStatus" role="status" aria-live="polite"></p>
-<div class="grid"><section class="card"><span class="eyebrow">01 / PICK YOUR NUMBERS</span><h2>手动选号</h2><form id="ticketForm" novalidate><fieldset><legend>主号码 <small>5 个不重复的整数 · 1–30</small></legend><div class="numbers">
-<label><span class="sr">主号码 1</span><input id="m1" type="number" min="1" max="30" step="1" required placeholder="—"></label>
-<label><span class="sr">主号码 2</span><input id="m2" type="number" min="1" max="30" step="1" required placeholder="—"></label>
-<label><span class="sr">主号码 3</span><input id="m3" type="number" min="1" max="30" step="1" required placeholder="—"></label>
-<label><span class="sr">主号码 4</span><input id="m4" type="number" min="1" max="30" step="1" required placeholder="—"></label>
-<label><span class="sr">主号码 5</span><input id="m5" type="number" min="1" max="30" step="1" required placeholder="—"></label></div></fieldset>
+<div class="grid"><section class="card"><span class="eyebrow">01 / PICK YOUR NUMBERS</span><h2>手动选号</h2><form id="ticketForm" novalidate><fieldset><legend>主号码 <small>5 个不重复的整数 · 1–<span id="mainMaxLabel">?</span>（以当期为准）</small></legend><div class="numbers">
+<label><span class="sr">主号码 1</span><input id="m1" type="number" min="1" step="1" required placeholder="—"></label>
+<label><span class="sr">主号码 2</span><input id="m2" type="number" min="1" step="1" required placeholder="—"></label>
+<label><span class="sr">主号码 3</span><input id="m3" type="number" min="1" step="1" required placeholder="—"></label>
+<label><span class="sr">主号码 4</span><input id="m4" type="number" min="1" step="1" required placeholder="—"></label>
+<label><span class="sr">主号码 5</span><input id="m5" type="number" min="1" step="1" required placeholder="—"></label></div></fieldset>
 <label class="bonus-label" for="bonus">Bonus 号码 <small>1–<span id="bonusLabel">?</span></small></label><input id="bonus" class="bonus-input" type="number" min="1" step="1" required placeholder="—">
 <div class="note">每次提交购买 1 注。额度不足时先授权本注 USDC，再确认购票交易。钱包另需 ETH 支付 Base 网络费。</div><button id="submit" type="submit">提交彩票 →</button><div id="ticketStatus" role="status" aria-live="polite"></div><div id="transactions"></div></form></section>
 <section class="card"><span class="eyebrow">02 / PAST DRAWINGS</span><h2>最近开奖结果</h2><form id="historyForm"><label for="count">查询最近多少期？</label><div class="query"><input id="count" type="number" min="1" max="500" step="1" value="10" required><button id="historyButton">查询开奖</button></div><small>支持 1–500 期，按期号倒序，仅展示已开奖期数。</small></form><p id="historyStatus" role="status" aria-live="polite">查询无需连接钱包。</p><div id="results" class="results"></div></section></div>

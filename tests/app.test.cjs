@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 function app() {
  const elements = new Map();
- const element = () => ({textContent:'',className:'',value:'',disabled:false,children:[],addEventListener(){},append(...v){this.children.push(...v)},replaceChildren(){this.children=[]}});
+ const element = () => ({textContent:'',className:'',value:'',disabled:false,children:[],addEventListener(){},append(...v){this.children.push(...v)},removeAttribute(name){delete this[name]},replaceChildren(){this.children=[]}});
  const context = vm.createContext({console, Date, Set, Number, BigInt, document:{getElementById(id){if(!elements.has(id))elements.set(id,element());return elements.get(id)}, createElement:element}, window:{setInterval(){}}});
  vm.runInContext(fs.readFileSync('app.js','utf8'),context);
  return {context,elements,run: code => vm.runInContext(code,context)};
@@ -13,7 +13,7 @@ function app() {
 test('validates integers, bounds, duplicates, missing values and sorts a copy',()=>{
  const {run} = app();
  assert.equal(run('JSON.stringify(validateTicket([30,1,9,3,8],7,7).normals)'), '[1,3,8,9,30]');
- for(const code of ['validateTicket([1,2,3,4,4],1,7)','validateTicket([0,2,3,4,5],1,7)','validateTicket([31,2,3,4,5],1,7)','validateTicket([1.5,2,3,4,5],1,7)','validateTicket([1,2,3,4,5],8,7)','validateTicket([1,2,3,4,5],1.2,7)','validateTicket([1,2,3,4,5],0,7)','validateTicket([1,2,3,4,5],1,NaN)']) assert.throws(()=>run(code));
+ for(const code of ['validateTicket([1,2,3,4,4],1,7)','validateTicket([0,2,3,4,5],1,7)','validateTicket([31,2,3,4,5],1,7,30)','validateTicket([1.5,2,3,4,5],1,7)','validateTicket([1,2,3,4,5],8,7)','validateTicket([1,2,3,4,5],1.2,7)','validateTicket([1,2,3,4,5],0,7)','validateTicket([1,2,3,4,5],1,NaN)']) assert.throws(()=>run(code));
 });
 test('history includes settled current round, skips unsettled and stops at requested count',async()=>{
  const {run,elements,context} = app();
@@ -215,4 +215,18 @@ test('record refresh failure preserves already loaded pages and unlocks controls
  await a.run('queryRecords()');a.run("fetchRecords=async()=>{throw Error('限流')}");await a.run('queryRecords(true)');
  assert.equal(a.elements.get('purchaseRecords').children.length,1);assert.match(a.elements.get('recordsStatus').textContent,/限流/);
  assert.equal(a.elements.get('recordsMore').disabled,false);
+});
+
+test('main number validation follows the round bound instead of a fixed 30',()=>{
+ const {run}=app();
+ assert.equal(run('validateTicket([1,2,3,4,25],1,10,25).normals[4]'),25);
+ assert.throws(()=>run('validateTicket([1,2,3,4,26],1,10,25)'),/1–25/);
+ assert.equal(run('validateTicket([1,2,3,4,35],1,10,35).normals[4]'),35);
+ assert.throws(()=>run('validateTicket([1,2,3,4,5],1,10,NaN)'),/有效的主号码上限/);
+});
+test('current state updates the main number label and all five input limits',()=>{
+ const a=app();a.context.ethers={formatUnits:()=> '1.0'};
+ a.run('showCurrent({id:225n,state:{prizePool:1n,ticketPrice:1n,drawingTime:1n,winningTicket:0n,jackpotLock:false,bonusballMax:10n,ballMax:25n}})');
+ assert.equal(a.elements.get('mainMaxLabel').textContent,'25');
+ for(let i=1;i<=5;i++)assert.equal(a.elements.get('m'+i).max,'25');
 });

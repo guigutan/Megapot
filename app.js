@@ -332,6 +332,12 @@ async function snapshot(c) {
 }
 function showCurrent({id, state}) {
  currentDrawingState = state;
+ const ballMax = Number(state.ballMax);
+ $('mainMaxLabel').textContent = Number.isInteger(ballMax) && ballMax >= 5 && ballMax <= 255 ? String(ballMax) : '?';
+ for (const id of ['m1','m2','m3','m4','m5']) {
+  if (Number.isInteger(ballMax) && ballMax >= 5 && ballMax <= 255) $(id).max = String(ballMax);
+  else $(id).removeAttribute('max');
+ }
  const [whole, fraction] = ethers.formatUnits(state.prizePool, 6).split('.');
  $('prizePool').textContent = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (fraction && /[1-9]/.test(fraction) ? `.${fraction}` : '');
  $('drawingAt').textContent = Number(state.drawingTime) > 0
@@ -351,8 +357,9 @@ async function refresh() {
  catch (e) { status('globalStatus', `读取失败：${errorText(e)}`, 'error'); }
  finally { $('refresh').disabled = false; }
 }
-function validateTicket(normals, bonusball, max, ballMax = 30) {
- if (normals.length !== 5 || normals.some(n => !Number.isInteger(n) || n < 1 || n > Math.min(30, ballMax))) throw new Error(`主号码必须是 1–${Math.min(30, ballMax)} 的 5 个整数。`);
+function validateTicket(normals, bonusball, max, ballMax = 255) {
+ if (!Number.isInteger(ballMax) || ballMax < 5 || ballMax > 255) throw new Error('请先获取有效的主号码上限。');
+ if (normals.length !== 5 || normals.some(n => !Number.isInteger(n) || n < 1 || n > ballMax)) throw new Error(`主号码必须是 1–${ballMax} 的 5 个整数。`);
  if (new Set(normals).size !== 5) throw new Error('5 个主号码不能重复。');
  if (!Number.isInteger(max) || max < 1) throw new Error('请先获取有效的 Bonus 上限。');
  if (!Number.isInteger(bonusball) || bonusball < 1 || bonusball > max) throw new Error(`Bonus 号码必须是 1–${max} 的整数。`);
