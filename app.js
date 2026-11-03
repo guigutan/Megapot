@@ -60,7 +60,6 @@ function renderPastTiers(host, state, data) {
  head.append(titles); const body = makeNode('tbody');
  for (let tier = 11; tier >= 0; tier--) {
   const row = makeNode('tr');
-  const label = `${Math.floor(tier / 2)} 主号${tier % 2 ? ' + Bonus' : '（无 Bonus）'}${tier === 11 ? ' · 头奖' : ''}`;
   const label = `${Math.floor(tier / 2)}+${tier % 2}`;
   const values = [label, config ? percent(config.premiumTierWeights[tier]) : '未获取',
    config ? (config.minPayoutTiers[tier] ? '有' : '无') : '未获取',
